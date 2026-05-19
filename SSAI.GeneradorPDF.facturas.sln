@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.36602.28
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SSAI.GeneradorPDF.facturas", "SSAI.GeneradorPDF.facturas.csproj", "{CC156F82-D2CF-4600-A17C-AEB4FE7EBF7F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{CC156F82-D2CF-4600-A17C-AEB4FE7EBF7F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CC156F82-D2CF-4600-A17C-AEB4FE7EBF7F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CC156F82-D2CF-4600-A17C-AEB4FE7EBF7F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CC156F82-D2CF-4600-A17C-AEB4FE7EBF7F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8DACA770-2159-462C-82EE-3CD9CFBBA5FD}
+	EndGlobalSection
+EndGlobal
