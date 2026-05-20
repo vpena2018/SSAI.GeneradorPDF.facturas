@@ -1,4 +1,6 @@
 ﻿using CrystalDecisions.CrystalReports.Engine;
+using iTextSharp.text;
+using iTextSharp.text.pdf;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
@@ -129,7 +131,9 @@ namespace SSAI.GeneradorPDF.facturas.Logic
 
         private static string connSSAI = ConfigurationManager.ConnectionStrings["Hertz_ProjectsEntities"].ToString().Split('"')[1];
 
-        public static bool EsperarArchivoLibre(string ruta, int intentos = 10)
+        public static bool EsperarArchivoLibre(
+            string ruta,
+            int intentos = 10)
         {
             for (int i = 0; i < intentos; i++)
             {
@@ -139,7 +143,7 @@ namespace SSAI.GeneradorPDF.facturas.Logic
                         ruta,
                         FileMode.Open,
                         FileAccess.Read,
-                        FileShare.None))
+                        FileShare.ReadWrite))
                     {
                         return true;
                     }
@@ -397,6 +401,268 @@ namespace SSAI.GeneradorPDF.facturas.Logic
 
         }
 
+        public static void UnirPdfs(
+            List<string> archivosPdf,
+            string rutaSalida)
+        {
+            using (Document document = new Document())
+            {
+                using (FileStream stream = new FileStream(
+                    rutaSalida,
+                    FileMode.Create))
+                {
+                    using (PdfCopy copy = new PdfCopy(document, stream))
+                    {
+                        document.Open();
+
+                        foreach (string archivo in archivosPdf)
+                        {
+                            using (PdfReader reader = new PdfReader(archivo))
+                            {
+                                for (int i = 1; i <= reader.NumberOfPages; i++)
+                                {
+                                    copy.AddPage(
+                                        copy.GetImportedPage(reader, i)
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+
+        public static bool generatePdfFacturaCopias(
+    facturaEnvioRow factura,
+    int docEntry,
+    string n_factura,
+    byte[] firma,
+    string rutaFirma,
+    out List<string> rutasPdfGenerados,
+    out string error)
+        {
+            ReportDocument cryRpt = new ReportDocument();
+
+            rutasPdfGenerados = new List<string>();
+            error = string.Empty;
+
+            try
+            {
+                var db = "SBO_HERTZ_PRUEBAS";
+
+                using (var context = new models.Hertz_ProjectsEntities())
+                {
+                    var row = context.api_configuration.FirstOrDefault();
+
+                    if (row != null)
+                        db = row.CompanyDB;
+                }
+
+                var reporte = string.Empty;
+
+                if (factura.franquicia.ToUpper() == "HERTZ")
+                {
+                    reporte = "FacturadeVentaHERTZ_correo.rpt";
+                }
+                else if (factura.franquicia.ToUpper() == "DOLLAR")
+                {
+                    reporte = "FacturadeVentaDOLLAR_correo.rpt";
+                }
+                else if (factura.franquicia.ToUpper() == "THRIFTY")
+                {
+                    reporte = "FacturadeVentaTHRIFTY_correo.rpt";
+                }
+                else
+                {
+                    return false;
+                }
+
+                var rutaReporte = Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    "reportes",
+                    reporte
+                );
+
+                // LIMPIAR FACTURA
+                string facturaLimpia = n_factura
+                    .Replace("/", "_")
+                    .Replace("\\", "_")
+                    .Replace(" ", "_");
+
+                // NUEVA RUTA
+
+                //string carpetaShare =
+                //@"\\10.10.1.31\scaneos\SAP\facturas_pdf_SAP\temp";
+
+                string carpetaShare = Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    "temp_pdf"
+                );
+
+                // CREAR CARPETA SI NO EXISTE
+                if (!Directory.Exists(carpetaShare))
+                    Directory.CreateDirectory(carpetaShare);
+
+                // CARGAR REPORTE
+                cryRpt.Load(rutaReporte);
+
+                // CONEXION
+                cryRpt.DataSourceConnections[0].SetConnection(
+                    "10.10.2.10",
+                    db,
+                    "System",
+                    "Sap5erver"
+                );
+
+                // PARAMETROS
+                cryRpt.SetParameterValue("UserCode@", "dvelasquez");
+                cryRpt.SetParameterValue("Schema@", db);
+                cryRpt.SetParameterValue("DocKey@", docEntry);
+
+                
+
+                // FIRMA
+                if (firma != null && firma.Length > 0)
+                {
+                    string carpetaFirma = Path.GetDirectoryName(rutaFirma);
+
+                    if (!Directory.Exists(carpetaFirma))
+                        Directory.CreateDirectory(carpetaFirma);
+
+                    File.WriteAllBytes(rutaFirma, firma);
+
+                    cryRpt.SetParameterValue("FirmaRuta", rutaFirma);
+                }
+
+                // COPIAS
+                List<string> archivos = new List<string>()
+        {
+            "ORIGINAL",
+            "CONTABILIDAD",
+            "ARCHIVO"
+        };
+
+                foreach (var departamento in archivos)
+                {
+                    // LOG INICIO
+                    File.AppendAllText(
+                        Path.Combine(
+                            AppDomain.CurrentDomain.BaseDirectory,
+                            "debug_exports.txt"
+                        ),
+                        $"{DateTime.Now} - INICIO - " +
+                        $"{factura.contrato} - " +
+                        $"{departamento}\r\n"
+                    );
+
+                    cryRpt.SetParameterValue(
+                        "TipoCopia",
+                        departamento
+                    );
+
+                    // NOMBRE PDF
+                    string nombrePdf =
+                        $"Factura_{factura.contrato}_{departamento}.pdf";
+
+                    // RUTA FINAL
+                    string rutaPdfFinal = Path.Combine(
+                        carpetaShare,
+                        nombrePdf
+                    );
+
+                    // EXPORTAR
+                    cryRpt.ExportToDisk(
+                        CrystalDecisions.Shared
+                            .ExportFormatType
+                            .PortableDocFormat,
+                        rutaPdfFinal
+                    );
+
+                    // LOG EXPORT OK
+                    File.AppendAllText(
+                        Path.Combine(
+                            AppDomain.CurrentDomain.BaseDirectory,
+                            "debug_exports.txt"
+                        ),
+                        $"{DateTime.Now} - EXPORT OK - " +
+                        $"{factura.contrato} - " +
+                        $"{departamento}\r\n"
+                    );
+
+                    // VALIDAR EXISTE
+                    if (!File.Exists(rutaPdfFinal))
+                    {
+                        File.AppendAllText(
+                            Path.Combine(
+                                AppDomain.CurrentDomain.BaseDirectory,
+                                "debug_exports.txt"
+                            ),
+                            $"{DateTime.Now} - NO EXISTE - " +
+                            $"{rutaPdfFinal}\r\n"
+                        );
+                    }
+                    else
+                    {
+                        File.AppendAllText(
+                            Path.Combine(
+                                AppDomain.CurrentDomain.BaseDirectory,
+                                "debug_exports.txt"
+                            ),
+                            $"{DateTime.Now} - EXISTE - " +
+                            $"{rutaPdfFinal}\r\n"
+                        );
+                    }
+
+                    rutasPdfGenerados.Add(rutaPdfFinal);
+
+                    // ESPERA
+                    Thread.Sleep(1000);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                rutasPdfGenerados = new List<string>();
+                error = ex.Message;
+
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    cryRpt.Close();
+                    cryRpt.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                }
+
+                // BORRAR FIRMA TEMPORAL
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(rutaFirma) &&
+                        File.Exists(rutaFirma))
+                    {
+                        File.Delete(rutaFirma);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                }
+
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
+        }
+
         public static bool generatePdfFactura(
     facturaEnvioRow factura,
     int docEntry,
@@ -563,154 +829,6 @@ namespace SSAI.GeneradorPDF.facturas.Logic
             }
         }
 
-        public static bool generatePdfFacturaOld(
-    facturaEnvioRow factura,
-    int docEntry,
-    string n_factura,
-    byte[] firma,
-    string rutaFirma)
-        {
-            ReportDocument cryRpt = new ReportDocument();
-
-            try
-            {
-                var db = "SBO_HERTZ_PRUEBAS";
-
-                using (var context = new models.Hertz_ProjectsEntities())
-                {
-                    var row = context.api_configuration.FirstOrDefault();
-
-                    if (row != null)
-                        db = row.CompanyDB;
-                }
-
-                var reporte = string.Empty;
-
-                if (factura.franquicia.ToUpper() == "HERTZ")
-                {
-                    reporte = "FacturadeVentaHERTZ_correo.rpt";
-                }
-                else if (factura.franquicia.ToUpper() == "DOLLAR")
-                {
-                    reporte = "FacturadeVentaDOLLAR_correo.rpt";
-                }
-                else if (factura.franquicia.ToUpper() == "THRIFTY")
-                {
-                    reporte = "FacturadeVentaTHRIFTY_correo.rpt";
-                }
-                else
-                {
-                    return false;
-                }
-
-                var rutaReporte = Path.Combine(
-                    AppDomain.CurrentDomain.BaseDirectory,
-                    "reportes",
-                    reporte
-                );
-
-                // LIMPIAR USUARIO
-                string usuarioLimpio = factura.usuario
-                    .Replace("/", "_")
-                    .Replace("\\", "_")
-                    .Replace(" ", "_");
-
-                // LIMPIAR FACTURA
-                string facturaLimpia = n_factura
-                    .Replace("/", "_")
-                    .Replace("\\", "_")
-                    .Replace(" ", "_");
-
-                // NOMBRE PDF
-                string nombrePdf =
-                    $"{factura.docEntry}_{usuarioLimpio}_{facturaLimpia}.pdf";
-
-                // SHARE
-                string carpetaShare =
-                    @"\\10.10.1.31\scaneos\SAP\facturas_pdf_SSAI";
-
-                if (!Directory.Exists(carpetaShare))
-                    Directory.CreateDirectory(carpetaShare);
-
-                // PDF FINAL
-                string rutaPdfFinal = Path.Combine(
-                    carpetaShare,
-                    nombrePdf
-                );
-
-                // CARGAR REPORTE
-                cryRpt.Load(rutaReporte);
-
-                // CONEXION
-                cryRpt.DataSourceConnections[0].SetConnection(
-                    "10.10.2.10",
-                    db,
-                    "System",
-                    "Sap5erver"
-                );
-
-                // PARAMETROS
-                cryRpt.SetParameterValue("UserCode@", "dvelasquez");
-                cryRpt.SetParameterValue("Schema@", db);
-                cryRpt.SetParameterValue("DocKey@", docEntry);
-
-                // FIRMA
-                if (firma != null && firma.Length > 0)
-                {
-                    string carpetaFirma = Path.GetDirectoryName(rutaFirma);
-
-                    if (!Directory.Exists(carpetaFirma))
-                        Directory.CreateDirectory(carpetaFirma);
-
-                    File.WriteAllBytes(rutaFirma, firma);
-
-                    cryRpt.SetParameterValue("FirmaRuta", rutaFirma);
-                }
-
-                // EXPORTAR PDF
-                cryRpt.ExportToDisk(
-                    CrystalDecisions.Shared.ExportFormatType.PortableDocFormat,
-                    rutaPdfFinal
-                );
-
-                // PEQUEÑA ESPERA
-                System.Threading.Thread.Sleep(1000);
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                try
-                {
-                    cryRpt.Close();
-                    cryRpt.Dispose();
-                }
-                catch
-                {
-                }
-
-                // BORRAR FIRMA TEMPORAL
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(rutaFirma) &&
-                        File.Exists(rutaFirma))
-                    {
-                        File.Delete(rutaFirma);
-                    }
-                }
-                catch
-                {
-                }
-
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-            }
-        }
 
         public static List<facturaEnvioRow> CompletarCorreosFacturas(
     List<facturaEnvioRow> facturas,
